@@ -5,7 +5,7 @@ default[:deployment][:welcome] = "VMware's Cloud Application Platform"
 default[:cloud_controller][:config_file] = "cloud_controller.yml"
 default[:cloud_controller][:service_api_uri] = "http://api.#{node[:deployment][:domain]}"
 default[:cloud_controller][:local_route] = nil
-default[:cloud_controller][:admins] = ["dev@cloudfoundry.org"]
+default[:cloud_controller][:admins] = ["cfadmin@ironfoundry.org"]
 
 # Staging
 default[:cloud_controller][:staging][:aspdotnet] = "aspdotnet.yml"
@@ -25,7 +25,7 @@ default[:cloud_controller][:staging][:wsgi] = "wsgi.yml"
 default[:cloud_controller][:staging][:standalone] = "standalone.yml"
 
 # Default builtin services
-default[:cloud_controller][:builtin_services] = ["redis", "mongodb", "mysql", "neo4j", "rabbitmq"]
+default[:cloud_controller][:builtin_services] = ["redis", "mongodb", "mysql", "neo4j", "rabbitmq", "mssql", "postgresql"]
 
 # Default capacity
 default[:capacity][:max_uris] = 4
