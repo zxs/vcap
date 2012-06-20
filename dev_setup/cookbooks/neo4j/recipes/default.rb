@@ -4,6 +4,7 @@
 #
 # Copyright 2011, VMware
 #
+
 [node[:neo4j][:service_dir], File.join(node[:neo4j][:service_dir], "instances")].each do |dir|
   directory dir do
     owner node[:deployment][:user]
@@ -20,6 +21,6 @@ end
 
 remote_file File.join(node[:neo4j][:service_dir], "neo4j-hosting-extension.jar") do
   owner node[:deployment][:user]
-  source "http://dist.neo4j.org/#{node[:neo4j][:hosting_extension]}"
+  source "http://m2.neo4j.org/content/repositories/releases/org/neo4j/server/authentication-extension/1.4/#{node[:neo4j][:hosting_extension]}"
   not_if { ::File.exists?(File.join(node[:neo4j][:service_dir], "neo4j-hosting-extension.jar")) }
 end

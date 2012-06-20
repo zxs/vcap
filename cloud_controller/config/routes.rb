@@ -39,6 +39,7 @@ CloudController::Application.routes.draw do
 
   post   'services/v1/offerings'                     => 'services#create',         :as => :service_create
   delete 'services/v1/offerings/:label'              => 'services#delete',         :as => :service_delete,         :label => /[^\/]+/
+  get    'services/v1/offerings/:label'              => 'services#get',            :as => :service_get,            :label => /[^\/]+/
   get    'services/v1/offerings/:label/handles'      => 'services#list_handles',   :as => :service_list_handles,   :label => /[^\/]+/
   post   'services/v1/offerings/:label/handles/:id'  => 'services#update_handle',  :as => :service_update_handle,  :label => /[^\/]+/
   post   'services/v1/configurations'                => 'services#provision',      :as => :service_provision
@@ -52,12 +53,14 @@ CloudController::Application.routes.draw do
   # Brokered Services
   get    'brokered_services/poc/offerings' => 'services#list_brokered_services',   :as => :service_list_brokered_services
 
-  # Service life cycle apis
+  # Service lifecycle apis
   post   'services/v1/configurations/:id/snapshots'          => 'services#create_snapshot',      :as => :service_create_snapshot,       :id   => /[^\/]+/
   get    'services/v1/configurations/:id/snapshots'          => 'services#enum_snapshots',       :as => :service_enum_snapshots,        :id   => /[^\/]+/
   get    'services/v1/configurations/:id/snapshots/:sid'     => 'services#snapshot_details',     :as => :service_snapshot_details,      :id   => /[^\/]+/, :sid => /[^\/]+/
   put    'services/v1/configurations/:id/snapshots/:sid'     => 'services#rollback_snapshot',    :as => :service_rollback_snapshot,     :id   => /[^\/]+/, :sid => /[^\/]+/
-  get    'services/v1/configurations/:id/serialized/url'     => 'services#serialized_url',       :as => :service_serialized_url,    :id   => /[^\/]+/
+  delete 'services/v1/configurations/:id/snapshots/:sid'     => 'services#delete_snapshot',      :as => :service_delete_snapshot,     :id   => /[^\/]+/, :sid => /[^\/]+/
+  post   'services/v1/configurations/:id/serialized/url/snapshots/:sid'     => 'services#create_serialized_url',       :as => :service_create_serialized_url,    :id   => /[^\/]+/, :sid => /[^\/]+/
+  get    'services/v1/configurations/:id/serialized/url/snapshots/:sid'     => 'services#serialized_url',       :as => :service_serialized_url,    :id   => /[^\/]+/, :sid => /[^\/]+/
   put    'services/v1/configurations/:id/serialized/url'     => 'services#import_from_url',      :as => :service_import_from_url,       :id   => /[^\/]+/
   put    'services/v1/configurations/:id/serialized/data'    => 'services#import_from_data',     :as => :service_import_from_data,      :id   => /[^\/]+/
   get    'services/v1/configurations/:id/jobs/:job_id'       => 'services#job_info',             :as => :service_job_info,              :id   => /[^\/]+/, :job_id => /[^\/]+/
