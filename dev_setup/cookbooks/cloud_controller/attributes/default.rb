@@ -1,5 +1,7 @@
 include_recipe "deployment"
+include_attribute "postgresql"
 include_attributes "uaa"
+
 default[:deployment][:welcome] = "VMware's Cloud Application Platform"
 
 default[:cloud_controller][:config_file] = "cloud_controller.yml"
@@ -23,9 +25,10 @@ default[:cloud_controller][:staging][:php] = "php.yml"
 default[:cloud_controller][:staging][:django] = "django.yml"
 default[:cloud_controller][:staging][:wsgi] = "wsgi.yml"
 default[:cloud_controller][:staging][:standalone] = "standalone.yml"
+default[:cloud_controller][:staging][:play] = "play.yml"
 
 # Default builtin services
-default[:cloud_controller][:builtin_services] = ["redis", "mongodb", "mysql", "neo4j", "rabbitmq"]
+default[:cloud_controller][:builtin_services] = ["redis", "mongodb", "mysql", "neo4j", "rabbitmq", "postgresql", "vblob", "memcached", "filesystem", "elasticsearch"]
 
 # Default capacity
 default[:capacity][:max_uris] = 4

@@ -7,12 +7,12 @@ class ServicesController < ApplicationController
   include ServicesHelper
 
   before_filter :validate_content_type
-  before_filter :require_service_auth_token, :only => [:create, :delete, :update_handle, :list_handles, :list_brokered_services]
+  before_filter :require_service_auth_token, :only => [:create, :get, :delete, :update_handle, :list_handles, :list_brokered_services]
   before_filter :require_user, :only => [:provision, :bind, :bind_external, :unbind, :unprovision,
-                                         :create_snapshot, :enum_snapshots, :snapshot_details,:rollback_snapshot,
-                                         :serialized_url, :import_from_url, :import_from_data, :job_info]
-  before_filter :require_lifecycle_extension, :only => [:create_snapshot, :enum_snapshots, :snapshot_details,:rollback_snapshot,
-                                         :serialized_url, :import_from_url, :import_from_data, :job_info]
+                                         :create_snapshot, :enum_snapshots, :snapshot_details,:rollback_snapshot, :delete_snapshot,
+                                         :serialized_url, :create_serialized_url, :import_from_url, :import_from_data, :job_info]
+  before_filter :require_lifecycle_extension, :only => [:create_snapshot, :enum_snapshots, :snapshot_details,:rollback_snapshot, :delete_snapshot,
+                                         :serialized_url, :create_serialized_url, :import_from_url, :import_from_data, :job_info]
 
   rescue_from(JsonMessage::Error) {|e| render :status => 400, :json =>  {:errors => e.to_s}}
   rescue_from(ActiveRecord::RecordInvalid) {|e| render :status => 400, :json =>  {:errors => e.to_s}}
@@ -51,7 +51,9 @@ class ServicesController < ApplicationController
       # register with us to get a token.
       # or, it's a brokered service
       svc = Service.new(req.extract)
-      if AppConfig[:service_broker] and @service_auth_token == AppConfig[:service_broker][:token] and !svc.is_builtin?
+      if AppConfig[:service_broker] and \
+         AppConfig[:service_broker][:token].index(@service_auth_token) and \
+         !svc.is_builtin?
         attrs = req.extract.dup
         attrs[:token] = @service_auth_token
         svc.update_attributes!(attrs)
@@ -124,21 +126,26 @@ class ServicesController < ApplicationController
 
   # List brokered services
   def list_brokered_services
-    if AppConfig[:service_broker].nil? or @service_auth_token != AppConfig[:service_broker][:token]
+    if AppConfig[:service_broker].nil? or \
+       AppConfig[:service_broker][:token].index(@service_auth_token).nil?
       raise CloudError.new(CloudError::FORBIDDEN)
     end
 
-    svcs = Service.all
-    brokered_svcs = svcs.select {|svc| ! svc.is_builtin? }
-    result = []
-    brokered_svcs.each do |svc|
-      result << {
-        :label => svc.label,
-        :description => svc.description,
-        :acls => svc.acls,
-      }
-    end
+    result = Service.where(:token => @service_auth_token)
+    result = result.select { |svc| !svc.is_builtin? }
+    result = result.map { |svc| {:label => svc.label, \
+                  :description => svc.description, :acls => svc.acls } }
+
     render :json =>  {:brokered_services => result}
+  end
+
+  # Get a service offering on the CC
+  #
+  def get
+    svc = Service.find_by_label(params[:label])
+    raise CloudError.new(CloudError::SERVICE_NOT_FOUND) unless svc
+    raise CloudError.new(CloudError::FORBIDDEN) unless svc.verify_auth_token(@service_auth_token)
+    render :json => svc.hash_to_service_offering
   end
 
   # Unregister a service offering with the CC
@@ -192,7 +199,7 @@ class ServicesController < ApplicationController
 
     result = cfg.create_snapshot
 
-    render :json => result
+    render :json => result.extract
   end
 
   # Enumerate all snapshots of the given instance
@@ -204,7 +211,7 @@ class ServicesController < ApplicationController
 
     result = cfg.enum_snapshots
 
-    render :json => result
+    render :json => result.extract
   end
 
   # Get snapshot detail information
@@ -216,7 +223,7 @@ class ServicesController < ApplicationController
 
     result = cfg.snapshot_details params['sid']
 
-    render :json => result
+    render :json => result.extract
   end
 
   # Rollback to a snapshot
@@ -228,19 +235,42 @@ class ServicesController < ApplicationController
 
     result = cfg.rollback_snapshot params['sid']
 
-    render :json => result
+    render :json => result.extract
+  end
+
+  # Delete a snapshot
+  #
+  def delete_snapshot
+    cfg = ServiceConfig.find_by_user_id_and_name(user.id, params['id'])
+    raise CloudError.new(CloudError::SERVICE_NOT_FOUND) unless cfg
+    raise CloudError.new(CloudError::FORBIDDEN) unless cfg.provisioned_by?(user)
+
+    result = cfg.delete_snapshot params['sid']
+
+    render :json => result.extract
+  end
+
+  # Create serialized url for service snapshot
+  #
+  def create_serialized_url
+    cfg = ServiceConfig.find_by_user_id_and_name(user.id, params['id'])
+    raise CloudError.new(CloudError::SERVICE_NOT_FOUND) unless cfg
+    raise CloudError.new(CloudError::FORBIDDEN) unless cfg.provisioned_by?(user)
+
+    result = cfg.create_serialized_url params['sid']
+
+    render :json => result.extract
   end
 
   # Get the url to download serialized data for an instance
-  #
   def serialized_url
     cfg = ServiceConfig.find_by_user_id_and_name(user.id, params['id'])
     raise CloudError.new(CloudError::SERVICE_NOT_FOUND) unless cfg
     raise CloudError.new(CloudError::FORBIDDEN) unless cfg.provisioned_by?(user)
 
-    result = cfg.serialized_url
+    result = cfg.serialized_url params['sid']
 
-    render :json => result
+    render :json => result.extract
   end
 
   # import serialized data to an instance from url
@@ -254,7 +284,7 @@ class ServicesController < ApplicationController
 
     result = cfg.import_from_url req
 
-    render :json => result
+    render :json => result.extract
   end
 
   # import serialized data to an instance from request data
@@ -272,7 +302,7 @@ class ServicesController < ApplicationController
 
     result = cfg.import_from_data req
 
-    render :json => result
+    render :json => result.extract
   end
 
   # Get job information
@@ -284,7 +314,7 @@ class ServicesController < ApplicationController
 
     result = cfg.job_info params['job_id']
 
-    render :json => result
+    render :json => result.extract
   end
 
   # Binds a provisioned instance to an app

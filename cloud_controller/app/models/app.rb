@@ -24,9 +24,8 @@ class App < ActiveRecord::Base
   AppStates = %w[STOPPED STARTED]
   PackageStates = %w[PENDING STAGED FAILED]
 
-  Runtimes = %w[ruby18 ruby19 java node node06 php erlangR14B02 python2 aspdotnet40]
+  Runtimes = %w[ruby18 ruby19 java node node06 php erlangR14B02 python2 aspdotnet40 clr40 clr20] # TODO remove aspdotnet40 eventually
   Frameworks = %w[sinatra rack rails3 java_web spring grails node php otp_rebar lift aspdotnet wsgi django standalone unknown]
-
 
   validates_presence_of :name, :framework, :runtime
 
@@ -229,21 +228,8 @@ class App < ActiveRecord::Base
         :binding_options => binding_options
       )
 
-      if EM.reactor_running?
-        # yields
-        endpoint = "#{svc.url}/gateway/v1/configurations/#{req.service_id}/handles"
-        http = VCAP::Services::Api::AsyncHttpRequest.fibered(endpoint, svc.token, :post, svc.timeout, req)
-        if !http.error.empty?
-          raise "Error sending bind request #{req.extract.inspect} to gateway #{svc.url}: #{http.error}"
-        elsif http.response_header.status != 200
-          raise "Error sending bind request #{req.extract.inspect}, non 200 response from gateway #{svc.url}: #{http.response_header.status} #{http.response}"
-        end
-        handle = VCAP::Services::Api::GatewayBindResponse.decode(http.response)
-      else
-        uri = URI.parse(svc.url)
-        gw = VCAP::Services::Api::ServiceGatewayClient.new(uri.host, svc.token, uri.port)
-        handle = gw.bind(req.extract)
-      end
+      client = VCAP::Services::Api::ServiceGatewayClient.new(svc.url, svc.token, svc.timeout)
+      handle = client.bind(req.extract)
     rescue => e
       CloudController.logger.error("Exception talking to gateway: #{e}")
       CloudController.logger.error(e)
@@ -304,22 +290,8 @@ class App < ActiveRecord::Base
     binding.destroy
 
     begin
-      if EM.reactor_running?
-        endpoint = "#{svc.url}/gateway/v1/configurations/#{req.service_id}/handles/#{req.handle_id}"
-        http = VCAP::Services::Api::AsyncHttpRequest.new(endpoint, svc.token, :delete, svc.timeout, req)
-        http.callback do
-          if http.response_header.status != 200
-            CloudController.logger.error("Error sending unbind request #{req.extract.to_json} non 200 response from gateway #{svc.url}: #{http.response_header.status} #{http.response}")
-          end
-        end
-        http.errback do
-          CloudController.logger.error("Error sending unbind request #{req.extract.to_json} to gateway #{svc.url}: #{http.error}")
-        end
-      else
-        uri = URI.parse(svc.url)
-        gw = VCAP::Services::Api::ServiceGatewayClient.new(uri.host, svc.token, uri.port)
-        gw.unbind(req.extract)
-      end
+      client = VCAP::Services::Api::ServiceGatewayClient.new(svc.url, svc.token, svc.timeout)
+      client.unbind(req.extract)
     rescue => e
       tok.destroy
       CloudController.logger.error("Error talking to service gateway (svc.url): #{e.to_s}")
@@ -338,8 +310,10 @@ class App < ActiveRecord::Base
       FileUtils.rm_f(self.unstaged_package_path)
     end
     unless self.staged_package_hash.nil?
-      staged_package = File.join(AppPackage.package_dir, self.staged_package_hash)
-      FileUtils.rm_f(staged_package)
+      # GC droplets stored using sha1 of contents as identifier
+      FileUtils.rm_f(self.legacy_staged_package_path)
+
+      FileUtils.rm_f(self.staged_package_path)
     end
   end
 
@@ -477,7 +451,25 @@ class App < ActiveRecord::Base
 
   def staged_package_path
     if staged_package_hash
+      File.join(AppPackage.package_dir, "droplet_#{self.id}")
+    end
+  end
+
+  def legacy_staged_package_path
+    if staged_package_hash
       File.join(AppPackage.package_dir, staged_package_hash)
+    end
+  end
+
+  def resolve_staged_package_path
+    if staged_package_hash
+      if File.exist?(self.staged_package_path)
+        self.staged_package_path
+      elsif File.exist?(self.legacy_staged_package_path)
+        self.legacy_staged_package_path
+      else
+        nil
+      end
     end
   end
 
@@ -545,12 +537,13 @@ class App < ActiveRecord::Base
 
   def update_staged_package(upload_path)
     # Remove old package if needed
-    if self.staged_package_path
+    if self.legacy_staged_package_path
       CloudController.logger.info("Removing old staged package for" \
                                   + " app_id=#{self.id} app_name=#{self.name}" \
-                                  + " path=#{self.staged_package_path}")
-      FileUtils.rm_f(self.staged_package_path)
+                                  + " path=#{self.legacy_staged_package_path}")
+      FileUtils.rm_f(self.legacy_staged_package_path)
     end
+
     self.staged_package_hash = Digest::SHA1.file(upload_path).hexdigest
     FileUtils.mv(upload_path, self.staged_package_path)
   end

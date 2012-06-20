@@ -66,9 +66,20 @@ describe ServicesController do
         response.status.should == 200
       end
 
-      it 'should create service offerings for brokered service' do
+      it 'should create service offerings for single brokered service' do
         request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'broker'
-        AppConfig[:service_broker] = {:token => 'broker'}
+        AppConfig[:service_broker] = {:token => ['broker']}
+        post_msg :create do
+          VCAP::Services::Api::ServiceOfferingRequest.new(
+            :label => 'foo-bar',
+            :url   => 'http://localhost:56789')
+        end
+        response.status.should == 200
+      end
+
+      it 'should create service offerings for multiple brokered service' do
+        request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'broker'
+        AppConfig[:service_broker] = {:token => ['broker', 'foobar']}
         post_msg :create do
           VCAP::Services::Api::ServiceOfferingRequest.new(
             :label => 'foo-bar',
@@ -79,7 +90,7 @@ describe ServicesController do
 
       it 'should not create brokered service offerings if token mismatch' do
         request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'foobar'
-        AppConfig[:service_broker] = {:token => 'broker'}
+        AppConfig[:service_broker] = {:token => ['broker']}
         post_msg :create do
           VCAP::Services::Api::ServiceOfferingRequest.new(
             :label => 'foo-bar',
@@ -159,7 +170,7 @@ describe ServicesController do
         svc = Service.create(
           :label => 'foo-bar',
           :url   => 'http://www.google.com',
-          :token => 'foobar')
+          :token => ['foobar'])
         svc.should be_valid
 
         request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'barfoo'
@@ -221,6 +232,37 @@ describe ServicesController do
       end
     end
 
+    describe '#get' do
+      before :each do
+        @svc = Service.create(
+          :label => 'foo-bar',
+          :url   => 'http://www.google.com',
+          :plans => ['free', 'nonfree'],
+          :token => 'foobar')
+        @svc.should be_valid
+      end
+
+      it 'should return not found for unknown services' do
+        get :get, :label => 'xxx'
+        response.status.should == 404
+      end
+
+      it 'should return not authorized on token mismatch' do
+        request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'xxx'
+        get :get, :label => 'foo-bar'
+        response.status.should == 403
+      end
+
+      it 'should return the specific service offering' do
+        get :get, :label => 'foo-bar'
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["label"].should == 'foo-bar'
+        resp["url"].should   == 'http://www.google.com'
+        resp["plans"].should == ['free', 'nonfree']
+      end
+    end
+
     describe '#list_handles' do
       it 'should return not found for unknown services' do
         get :list_handles, :label => 'foo-bar'
@@ -257,7 +299,7 @@ describe ServicesController do
     describe '#list_brokered_services' do
       before :each do
         request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'broker'
-        AppConfig[:service_broker] = {:token => 'broker'}
+        AppConfig[:service_broker] = {:token => ['broker']}
       end
 
       it "should return not authorized on token mismatch" do
@@ -268,7 +310,7 @@ describe ServicesController do
 
       it "should not list builtin services" do
         AppConfig[:builtin_services] = {
-          :foo => {:token=>"foobar"}
+          :foo => {:token => ["foobar"]}
         }
         svc = Service.new
         svc.label = "foo-1.0"
@@ -282,18 +324,79 @@ describe ServicesController do
         Yajl::Parser.parse(response.body)['brokered_services'].should be_empty
       end
 
-      it "should list brokered services" do
+      it "should list single brokered services" do
         AppConfig[:builtin_services] = {
-          :foo => {:token=>"foobar"}
+          :foo => {:token => ["foobar"]}
         }
 
         svc = Service.new
         svc.label = "brokered-1.0"
         svc.url   = "http://localhost:56789"
-        svc.token = 'brokered'
+        svc.token = 'broker'
         svc.save
         svc.should be_valid
 
+        get :list_brokered_services
+        response.status.should == 200
+        Yajl::Parser.parse(response.body)['brokered_services'].size.should == 1
+      end
+
+      it "should list multiple brokered services" do
+        AppConfig[:builtin_services] = {
+          :foo => {:token => ["foobar"]}
+        }
+
+        svc = Service.new
+        svc.label = "brokered-1.0"
+        svc.url   = "http://localhost:56789"
+        svc.token = 'broker'
+        svc.save
+        svc.should be_valid
+
+        svc = Service.new
+        svc.label = "brokered-2.0"
+        svc.url   = "http://localhost:56789"
+        svc.token = 'broker'
+        svc.save
+        svc.should be_valid
+
+        get :list_brokered_services
+        response.status.should == 200
+        Yajl::Parser.parse(response.body)['brokered_services'].size.should == 2
+      end
+
+      it "should list multiple brokered services with different keys" do
+        AppConfig[:service_broker] = {
+          :token => ['broker', 'foobar']
+        }
+
+        svc = Service.new
+        svc.label = "brokered-1.0"
+        svc.url   = "http://localhost:56789"
+        svc.token = 'broker'
+        svc.save
+        svc.should be_valid
+
+        svc = Service.new
+        svc.label = "brokered-2.0"
+        svc.url   = "http://localhost:56789"
+        svc.token = 'foobar'
+        svc.save
+        svc.should be_valid
+
+        svc = Service.new
+        svc.label = "brokered-3.0"
+        svc.url   = "http://localhost:56789"
+        svc.token = 'broker'
+        svc.save
+        svc.should be_valid
+
+        request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'broker'
+        get :list_brokered_services
+        response.status.should == 200
+        Yajl::Parser.parse(response.body)['brokered_services'].size.should == 2
+
+        request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'foobar'
         get :list_brokered_services
         response.status.should == 200
         Yajl::Parser.parse(response.body)['brokered_services'].size.should == 1
@@ -302,6 +405,11 @@ describe ServicesController do
 
     describe '#update_handle' do
       before :each do
+        request.env['HTTP_X_VCAP_SERVICE_TOKEN'] = 'foobar'
+        AppConfig[:builtin_services] = {
+          :foo => {:token=>"foobar"}
+        }
+
         svc = Service.new
         svc.label = "foo-bar"
         svc.url   = "http://localhost:56789"
@@ -661,17 +769,18 @@ describe ServicesController do
     end
 
     describe "#lifecycle_extension" do
+
       it 'should return not implemented error when lifecycle is disabled' do
         begin
           origin = AppConfig.delete :service_lifecycle
-          %w(create_snapshot enum_snapshots serialized_url import_from_url import_from_data).each do |api|
+          %w(create_snapshot enum_snapshots import_from_url import_from_data).each do |api|
             post api.to_sym, :id => 'xxx'
             response.status.should == 501
             resp = Yajl::Parser.parse(response.body)
             resp['description'].include?("not implemented").should == true
           end
 
-          %w(snapshot_details rollback_snapshot).each do |api|
+          %w(snapshot_details rollback_snapshot delete_snapshot serialized_url create_serialized_url ).each do |api|
             post api.to_sym, :id => 'xxx', :sid => '1'
             response.status.should == 501
             resp = Yajl::Parser.parse(response.body)
@@ -689,6 +798,12 @@ describe ServicesController do
     end
 
     describe "#create_snapshot" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -700,9 +815,32 @@ describe ServicesController do
         post :create_snapshot, :id => 'xxx'
         response.status.should == 404
       end
+
+      it 'should create a snapshot job' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:create_snapshot).with(:service_id => @cfg.name).returns job
+
+        post :create_snapshot, :id => @cfg.name
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
+      end
+
     end
 
     describe "#enum_snapshots" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -713,10 +851,31 @@ describe ServicesController do
       it 'should return not found for unknown ids' do
         get :enum_snapshots, :id => 'xxx'
         response.status.should == 404
+      end
+
+      it 'should enum snapshots' do
+        snapshots = VCAP::Services::Api::SnapshotList.decode(
+          {
+          :snapshots => [{:snapshot_id => "abc"}]
+          }.to_json
+        )
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:enum_snapshots).with(:service_id => @cfg.name).returns snapshots
+
+        post :enum_snapshots, :id => @cfg.name
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["snapshots"].size.should == 1
+        resp["snapshots"][0]["snapshot_id"].should == "abc"
       end
     end
 
     describe "#snapshot_details" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -728,9 +887,44 @@ describe ServicesController do
         get :snapshot_details, :id => 'xxx', :sid => 'yyy'
         response.status.should == 404
       end
+
+      it 'should get snapshot_details' do
+        snapshot = VCAP::Services::Api::Snapshot.decode(
+          {
+            :snapshot_id => "abc",
+            :date => "1",
+            :size => 123
+          }.to_json
+        )
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:snapshot_details).with(:service_id => @cfg.name, :snapshot_id => snapshot.snapshot_id).returns snapshot
+
+        get :snapshot_details, :id => @cfg.name, :sid => snapshot.snapshot_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["snapshot_id"].should == "abc"
+      end
+
+      it "should handle not found error in snapshot details" do
+        err = VCAP::Services::Api::ServiceGatewayClient::NotFoundResponse.new(
+            VCAP::Services::Api::ServiceErrorResponse.decode(
+            {:code => 10000, :description => "not found"}.to_json
+          )
+        )
+        snapshot_id = "abc"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:snapshot_details).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).raises err
+
+        get :snapshot_details, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 404
+      end
     end
 
     describe "#rollback_snapshot" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -739,26 +933,168 @@ describe ServicesController do
       end
 
       it 'should return not found for unknown ids' do
-        put :snapshot_details, :id => 'xxx' , :sid => 'yyy'
+        put :rollback_snapshot, :id => 'xxx' , :sid => 'yyy'
+        response.status.should == 404
+      end
+
+      it 'should rollback a snapshot' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        snapshot_id = "abc"
+
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:rollback_snapshot).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).returns job
+
+        put :rollback_snapshot, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
+      end
+
+      it "should handle not found error in rollback snapshot" do
+        err = VCAP::Services::Api::ServiceGatewayClient::NotFoundResponse.new(
+            VCAP::Services::Api::ServiceErrorResponse.decode(
+            {:code => 10000, :description => "not found"}.to_json
+          )
+        )
+        snapshot_id = "abc"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:rollback_snapshot).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).raises err
+
+        put :rollback_snapshot, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 404
+      end
+    end
+
+    describe "#delete_snapshot" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
+
+      it 'should return not authorized for unknown users' do
+        request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
+        delete :delete_snapshot, :id => 'xxx', :sid => 'yyy'
+        response.status.should == 403
+      end
+
+      it 'should return not found for unknown ids' do
+        delete :delete_snapshot, :id => 'xxx' , :sid => 'yyy'
+        response.status.should == 404
+      end
+
+      it 'should delete a snapshot' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        snapshot_id = "abc"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:delete_snapshot).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).returns job
+
+        delete :delete_snapshot, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
+      end
+
+      it "should handle not found error in delete snapshot" do
+        err = VCAP::Services::Api::ServiceGatewayClient::NotFoundResponse.new(
+            VCAP::Services::Api::ServiceErrorResponse.decode(
+            {:code => 10000, :description => "not found"}.to_json
+          )
+        )
+        snapshot_id = "abc"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:delete_snapshot).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).raises err
+
+        delete :delete_snapshot, :id => @cfg.name, :sid => snapshot_id
         response.status.should == 404
       end
     end
 
     describe "#serialized_url" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
-        get :serialized_url, :id => 'xxx'
+        get :serialized_url, :id => 'xxx', :sid => '1'
         response.status.should == 403
       end
 
       it 'should return not found for unknown ids' do
-        get :serialized_url, :id => 'xxx'
+        get :serialized_url, :id => 'xxx', :sid => '1'
         response.status.should == 404
+      end
+
+      it 'should get serialized url' do
+        url = "http://api.vcap.me"
+        snapshot_id = "abc"
+        serialized_url = VCAP::Services::Api::SerializedURL.new(:url  => url)
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:serialized_url).with(:service_id => @cfg.name, :snapshot_id => snapshot_id ).returns serialized_url
+
+        get :serialized_url, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["url"].should == url
+      end
+    end
+
+    describe "#create_serialized_url" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
+
+      it 'should return not authorized for unknown users' do
+        request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
+        post :create_serialized_url, :id => 'xxx', :sid => '1'
+        response.status.should == 403
+      end
+
+      it 'should return not found for unknown ids' do
+        post :create_serialized_url, :id => 'xxx', :sid => '1'
+        response.status.should == 404
+      end
+
+      it 'should create serialized url job' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        snapshot_id = "abc"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:create_serialized_url).with(:service_id => @cfg.name, :snapshot_id => snapshot_id).returns job
+
+        post :create_serialized_url, :id => @cfg.name, :sid => snapshot_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
       end
     end
 
     describe "#import_from_url" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -780,9 +1116,36 @@ describe ServicesController do
         end
         response.status.should == 400
       end
+
+      it 'should create import from url job' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        url = "http://api.cloudfoundry.com"
+
+        req = VCAP::Services::Api::SerializedURL.new(:url => url)
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:import_from_url).with(anything).returns job
+
+        put_msg :import_from_url, :id => @cfg.name do
+          req
+        end
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
+      end
     end
 
     describe "#import_from_data" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -796,9 +1159,34 @@ describe ServicesController do
         end
         response.status.should == 404
       end
+
+      it 'should create import from data job' do
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => "abc",
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        req = VCAP::Services::Api::SerializedData.new(:data => 'raw_data' )
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:import_from_data).with(anything).returns job
+
+        put_msg :import_from_data, :id => @cfg.name do
+          req
+        end
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == "abc"
+      end
     end
 
     describe "#job_info" do
+      before :each do
+        cfg = ServiceConfig.new(:name => 'lifecycle', :alias => 'bar', :service => @svc, :user => @user)
+        cfg.save
+        cfg.should be_valid
+        @cfg = cfg
+      end
 
       it 'should return not authorized for unknown users' do
         request.env['HTTP_AUTHORIZATION'] = UserToken.create('bar@foo.com').encode
@@ -808,6 +1196,36 @@ describe ServicesController do
 
       it 'should return not found for unknown ids' do
         get :job_info, :id => 'xxx' , :job_id => 'yyy'
+        response.status.should == 404
+      end
+
+      it 'should return job_info' do
+        job_id = "job1"
+        job = VCAP::Services::Api::Job.decode(
+          {
+          :job_id => job_id,
+          :status => "queued",
+          :start_time => "1"
+          }.to_json
+        )
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:job_info).with(:service_id => @cfg.name, :job_id => job_id).returns job
+
+        get :job_info, :id => @cfg.name, :job_id => job_id
+        response.status.should == 200
+        resp = Yajl::Parser.parse(response.body)
+        resp["job_id"].should == job_id
+      end
+
+      it "should handle not found error in get job_info" do
+        err = VCAP::Services::Api::ServiceGatewayClient::NotFoundResponse.new(
+            VCAP::Services::Api::ServiceErrorResponse.decode(
+            {:code => 10000, :description => "job not found"}.to_json
+          )
+        )
+        job_id = "job1"
+        VCAP::Services::Api::ServiceGatewayClient.any_instance.stubs(:job_info).with(:service_id => @cfg.name, :job_id => job_id).raises err
+
+        get :job_info, :id => @cfg.name, :job_id => job_id
         response.status.should == 404
       end
     end

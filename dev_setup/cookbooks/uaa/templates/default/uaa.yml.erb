@@ -20,7 +20,8 @@ cloud_controller:
 
 jwt:
   token:
-    key: <%= node[:uaa][:jwt_secret] %>
+    signing-key: <%= node[:uaa][:jwt_secret] %>
+    verification-key: <%= node[:uaa][:jwt_secret] %>
 
 batch:
   username: <%= node[:uaa][:batch][:username] %>
@@ -42,6 +43,7 @@ oauth:
       id: cloud_controller
       secret: <%= node[:uaa][:cloud_controller][:password] %>
       resource-ids: scim,password,tokens
+      access-token-validity: 604800
     vmc:
       authorized-grant-types: implicit
       scope: read,password
@@ -49,3 +51,4 @@ oauth:
       id: vmc
       resource-ids: cloud_controller,openid,password
       redirect-uri: http://uaa.cloudfoundry.com/redirect/vmc
+      access-token-validity: 604800

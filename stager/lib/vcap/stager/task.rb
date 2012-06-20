@@ -86,7 +86,7 @@ class VCAP::Stager::Task
                       "output" => app_path)
 
     # Show errors but not progress, fail on non-200
-    res = @runner.run_logged("curl -s -S -f -K #{cfg_file.path}")
+    res = @runner.run_logged("env -u http_proxy -u https_proxy curl -s -S -f -K #{cfg_file.path}")
 
     unless res[:status].success?
       raise VCAP::Stager::TaskError.new("Failed downloading app")
@@ -142,7 +142,7 @@ class VCAP::Stager::Task
       if res[:timed_out]
         emsg = "Staging timed out after #{@max_staging_duration} seconds."
       else
-        emsg = "Staging plugin failed: #{res[:stdout]}"
+        emsg = "Staging plugin failed: #{res[:stderr]}"
       end
 
       task_logger.warn(emsg)
@@ -175,7 +175,7 @@ class VCAP::Stager::Task
                       "form" => "upload[droplet]=@#{droplet_path}")
 
     # Show errors but not progress, fail on non-200
-    res = @runner.run_logged("curl -s -S -f -K #{cfg_file.path}")
+    res = @runner.run_logged("env -u http_proxy -u https_proxy curl -s -S -f -K #{cfg_file.path}")
 
     unless res[:status].success?
       raise VCAP::Stager::TaskError.new("Failed uploading droplet")
