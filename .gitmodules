@@ -1,12 +1,12 @@
 [submodule "services"]
 	path = services
-	url = https://zxs@github.com/zxs/vcap-services.git
+	url = https://github.com/zxs/vcap-services.git
 [submodule "tests"]
 	path = tests
 	url = https://github.com/cloudfoundry/vcap-tests.git
 [submodule "java"]
 	path = java
-	url = https://github.com/cloudfoundry/vcap-java.git
+	url = https://github.com/zxs/vcap-java.git
 [submodule "uaa"]
 	path = uaa
 	url = https://github.com/cloudfoundry/uaa.git
