@@ -13,7 +13,16 @@ def load_current_resource
 end
 
 def stream_to_tempfile(uri)
-  Net::HTTP.start(uri.host, uri.port) do |http|
+  p "-----has proxy? " + ENV['http_proxy']
+  proxy_host=nil
+  proxy_port=nil
+  if ENV['http_proxy'] !=nil 
+    proxy = URI.parse(ENV['http_proxy'])
+    proxy_host = proxy.host
+    proxy_port = proxy.port
+  end  
+  p "----- " + proxy_host + " : " + proxy_port.to_s 
+  Net::HTTP.start(uri.host, uri.port, proxy_host, proxy_port) do |http|
     http.request_get(uri.path) do |response|
       Tempfile.open('cf-temp') do |tf|
         response.read_body {|chunk| tf.write(chunk) }
